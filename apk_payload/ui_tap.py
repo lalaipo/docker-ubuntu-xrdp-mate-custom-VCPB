@@ -62,7 +62,7 @@ def main():
     # 1. Check Page 1
     dump_ui("/sdcard/ui_p1.xml", "./ui_p1.xml")
 
-    # 2. Swipe left to navigate to Page 2 (Graphics & Performance toggles)
+    # 2. Swipe left to navigate to Page 2
     print("\n=== STEP 1: SWIPING LEFT TO PAGE 2 ===")
     swipe_left()
 
@@ -72,45 +72,24 @@ def main():
     texts2 = [n["text"] for n in nodes2 if n["text"]]
     print(f"Page 2 visible texts: {texts2}")
 
-    # Find the clickable container row for Virtual GPU Optimization [42,747][1038,916]
-    target_row = next((n for n in nodes2 if n["clickable"] and "747" in n["bounds"]), None)
-    if not target_row:
-        # Fallback by text matching
-        print("Finding row by text position...")
-        target_row = next((n for n in nodes2 if n["clickable"] and "1038" in n["bounds"]), None)
-
-    # Coordinates: switch toggle thumb is at x=950, y=831
-    switch_x = 950
-    switch_y = 831
-
-    if target_row:
-        nums = list(map(int, re.findall(r"-?\d+", target_row["bounds"])))
-        if len(nums) == 4:
-            x1, y1, x2, y2 = nums
-            switch_x = x2 - 80
-            switch_y = (y1 + y2) // 2
-            print(f"Target row bounds: {target_row['bounds']} -> Switch tap coords: ({switch_x}, {switch_y})")
-
-    # 3. CAPTURE BEFORE SCREENSHOT (TOGGLE OFF)
+    # 3. CAPTURE BEFORE SCREENSHOT
     print("\n=== STEP 2: CAPTURING screen_before_toggle.png ===")
     take_screen("/sdcard/screen_before_toggle.png", "./screen_before_toggle.png")
 
-    # 4. TAP SWITCH TO TOGGLE ON
-    print(f"\n=== STEP 3: TAPPING SWITCH ON AT ({switch_x}, {switch_y}) ===")
-    tap(switch_x, switch_y)
+    # 4. TAP ROW (Center of row [42,747][1038,916] is 540, 831)
+    print("\n=== STEP 3: TAPPING ROW CENTER AT (540, 831) ===")
+    tap(540, 831)
+    time.sleep(1)
+
+    # Also tap switch thumb at (920, 831)
+    print("\n=== TAPPING SWITCH THUMB AT (920, 831) ===")
+    tap(920, 831)
     time.sleep(2)
 
-    # 5. CAPTURE AFTER SCREENSHOT (TOGGLE ON)
+    # 5. CAPTURE AFTER SCREENSHOT
     print("\n=== STEP 4: CAPTURING screen_after_toggle.png ===")
     take_screen("/sdcard/screen_after_toggle.png", "./screen_after_toggle.png")
     dump_ui("/sdcard/ui_after_on.xml", "./ui_after_on.xml")
-
-    # 6. TAP SWITCH AGAIN TO TOGGLE OFF (VERIFY REVERSIBILITY)
-    print(f"\n=== STEP 5: TAPPING SWITCH OFF AT ({switch_x}, {switch_y}) ===")
-    tap(switch_x, switch_y)
-    time.sleep(2)
-    take_screen("/sdcard/screen_toggle_off.png", "./screen_toggle_off.png")
-    dump_ui("/sdcard/ui_after_off.xml", "./ui_after_off.xml")
 
     print("\n=== TEST COMPLETED SUCCESSFULLY ===")
 
