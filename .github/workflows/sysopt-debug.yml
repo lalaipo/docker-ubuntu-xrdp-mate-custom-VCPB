@@ -74,9 +74,7 @@ jobs:
             sleep 8
 
             echo "== app process check =="
-            adb shell pidof com.itos.sysopt || echo "APP PROCESS NOT RUNNING"
-            APP_PID=$(adb shell pidof com.itos.sysopt | tr -d '\r')
-            echo "APP_PID=$APP_PID"
+            adb shell "pidof com.itos.sysopt || echo APP_PROCESS_NOT_RUNNING"
 
             echo "== running UI tap automation =="
             python3 apk_payload/ui_tap.py || true
@@ -89,10 +87,8 @@ jobs:
             echo "== SYSOPT_DBG LOGCAT OUTPUT =="
             adb logcat -d | grep SYSOPT_DBG || echo "NO SYSOPT_DBG LINES FOUND"
 
-            echo "== logcat filtered by app PID (full, no tail truncation) =="
-            if [ -n "$APP_PID" ]; then
-              adb logcat -d --pid="$APP_PID" || true
-            fi
+            echo "== logcat filtered by app pid (single-line, no shell state dependency) =="
+            adb shell "APP_PID=\$(pidof com.itos.sysopt); if [ -n \"\$APP_PID\" ]; then logcat -d --pid=\"\$APP_PID\"; else echo APP_PID_EMPTY; fi"
 
             echo "== logcat filtered by package tag AndroidRuntime/System.err/sysopt =="
             adb logcat -d | grep -iE "itos|sysopt|AndroidRuntime|FATAL EXCEPTION|System.err" | head -n 200
