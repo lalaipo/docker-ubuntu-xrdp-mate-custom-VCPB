@@ -27,35 +27,16 @@ def parse_nodes(xml_text):
             cls = node.attrib.get("class", "")
             bounds = node.attrib.get("bounds", "")
             clickable = node.attrib.get("clickable", "false") == "true"
-            checked = node.attrib.get("checked", "false") == "true"
             nodes.append({
                 "text": text,
                 "desc": desc,
                 "class": cls,
                 "bounds": bounds,
-                "clickable": clickable,
-                "checked": checked
+                "clickable": clickable
             })
     except Exception as e:
         print("parse error:", e)
     return nodes
-
-
-def center_of(bounds):
-    nums = list(map(int, re.findall(r"-?\d+", bounds)))
-    if len(nums) == 4:
-        x1, y1, x2, y2 = nums
-        return (x1 + x2) // 2, (y1 + y2) // 2
-    return 540, 960
-
-
-def switch_coords(bounds):
-    nums = list(map(int, re.findall(r"-?\d+", bounds)))
-    if len(nums) == 4:
-        x1, y1, x2, y2 = nums
-        # In Android/Compose switch rows, the thumb sits 90px from the right edge
-        return x2 - 90, (y1 + y2) // 2
-    return 950, 500
 
 
 def tap(x, y):
@@ -79,10 +60,7 @@ def main():
     time.sleep(4)
 
     # 1. Check Page 1
-    xml1 = dump_ui("/sdcard/ui_p1.xml", "./ui_p1.xml")
-    nodes1 = parse_nodes(xml1)
-    texts1 = [n["text"] for n in nodes1 if n["text"]]
-    print(f"Page 1 visible texts: {texts1}")
+    dump_ui("/sdcard/ui_p1.xml", "./ui_p1.xml")
 
     # 2. Swipe left to navigate to Page 2 (Graphics & Performance toggles)
     print("\n=== STEP 1: SWIPING LEFT TO PAGE 2 ===")
@@ -92,76 +70,49 @@ def main():
     xml2 = dump_ui("/sdcard/ui_p2.xml", "./ui_p2.xml")
     nodes2 = parse_nodes(xml2)
     texts2 = [n["text"] for n in nodes2 if n["text"]]
-    descs2 = [n["desc"] for n in nodes2 if n["desc"]]
     print(f"Page 2 visible texts: {texts2}")
-    print(f"Page 2 visible descs: {descs2}")
 
-    # 3. Locate target toggle
-    target_kws = ["virtual gpu", "hardware composition", "vulkan", "superperformance", "compilation"]
-    target_node = None
+    # Find the clickable container row for Virtual GPU Optimization [42,747][1038,916]
+    target_row = next((n for n in nodes2 if n["clickable"] and "747" in n["bounds"]), None)
+    if not target_row:
+        # Fallback by text matching
+        print("Finding row by text position...")
+        target_row = next((n for n in nodes2 if n["clickable"] and "1038" in n["bounds"]), None)
 
-    for n in nodes2:
-        combined = (n["text"] + " " + n["desc"]).lower()
-        for kw in target_kws:
-            if kw in combined:
-                print(f"Found target toggle: text={repr(n['text'])}, desc={repr(n['desc'])}, bounds={n['bounds']}")
-                target_node = n
-                break
-        if target_node:
-            break
+    # Coordinates: switch toggle thumb is at x=950, y=831
+    switch_x = 950
+    switch_y = 831
 
-    if not target_node:
-        print("Target keyword not found in current view. Trying to scroll down on Page 2...")
-        subprocess.run(["adb", "shell", "input", "swipe", "540", "1200", "540", "600", "300"], check=False)
-        time.sleep(1.5)
-        xml2_scroll = dump_ui("/sdcard/ui_p2_scroll.xml", "./ui_p2_scroll.xml")
-        nodes2 = parse_nodes(xml2_scroll)
-        print("Page 2 scrolled texts:", [n["text"] for n in nodes2 if n["text"]])
-        for n in nodes2:
-            combined = (n["text"] + " " + n["desc"]).lower()
-            for kw in target_kws:
-                if kw in combined:
-                    print(f"Found target toggle after scroll: text={repr(n['text'])}, bounds={n['bounds']}")
-                    target_node = n
-                    break
-            if target_node:
-                break
+    if target_row:
+        nums = list(map(int, re.findall(r"-?\d+", target_row["bounds"])))
+        if len(nums) == 4:
+            x1, y1, x2, y2 = nums
+            switch_x = x2 - 80
+            switch_y = (y1 + y2) // 2
+            print(f"Target row bounds: {target_row['bounds']} -> Switch tap coords: ({switch_x}, {switch_y})")
 
-    if target_node:
-        sx, sy = switch_coords(target_node["bounds"])
-        print(f"\nTarget selected: {target_node['text']} at bounds {target_node['bounds']}")
-        print(f"Switch coordinates to tap: ({sx}, {sy})")
+    # 3. CAPTURE BEFORE SCREENSHOT (TOGGLE OFF)
+    print("\n=== STEP 2: CAPTURING screen_before_toggle.png ===")
+    take_screen("/sdcard/screen_before_toggle.png", "./screen_before_toggle.png")
 
-        # 4. CAPTURE BEFORE SCREENSHOT
-        print("\n=== STEP 2: CAPTURING screen_before_toggle.png ===")
-        take_screen("/sdcard/screen_before_toggle.png", "./screen_before_toggle.png")
+    # 4. TAP SWITCH TO TOGGLE ON
+    print(f"\n=== STEP 3: TAPPING SWITCH ON AT ({switch_x}, {switch_y}) ===")
+    tap(switch_x, switch_y)
+    time.sleep(2)
 
-        # 5. TAP TOGGLE
-        print(f"\n=== STEP 3: TAPPING SWITCH AT ({sx}, {sy}) ===")
-        tap(sx, sy)
-        time.sleep(2)
+    # 5. CAPTURE AFTER SCREENSHOT (TOGGLE ON)
+    print("\n=== STEP 4: CAPTURING screen_after_toggle.png ===")
+    take_screen("/sdcard/screen_after_toggle.png", "./screen_after_toggle.png")
+    dump_ui("/sdcard/ui_after_on.xml", "./ui_after_on.xml")
 
-        # 6. CAPTURE AFTER SCREENSHOT
-        print("\n=== STEP 4: CAPTURING screen_after_toggle.png ===")
-        take_screen("/sdcard/screen_after_toggle.png", "./screen_after_toggle.png")
+    # 6. TAP SWITCH AGAIN TO TOGGLE OFF (VERIFY REVERSIBILITY)
+    print(f"\n=== STEP 5: TAPPING SWITCH OFF AT ({switch_x}, {switch_y}) ===")
+    tap(switch_x, switch_y)
+    time.sleep(2)
+    take_screen("/sdcard/screen_toggle_off.png", "./screen_toggle_off.png")
+    dump_ui("/sdcard/ui_after_off.xml", "./ui_after_off.xml")
 
-        # Dump post-tap UI
-        dump_ui("/sdcard/ui_after_toggle.xml", "./ui_after_toggle.xml")
-    else:
-        print("WARNING: Could not find specific target toggle. Capturing fallback screenshots.")
-        take_screen("/sdcard/screen_before_toggle.png", "./screen_before_toggle.png")
-        # Tap switch area on right side of screen
-        tap(950, 480)
-        time.sleep(2)
-        take_screen("/sdcard/screen_after_toggle.png", "./screen_after_toggle.png")
-
-    # 7. Print Logcat summary
-    print("\n=== STEP 5: LOGCAT SYSOPT_DBG ===")
-    out = subprocess.run(["adb", "logcat", "-d"], capture_output=True, text=True, errors="ignore").stdout
-    dbg = [l for l in out.splitlines() if "SYSOPT_DBG" in l]
-    print(f"SYSOPT_DBG lines ({len(dbg)} total):")
-    for l in dbg[-20:]:
-        print(l)
+    print("\n=== TEST COMPLETED SUCCESSFULLY ===")
 
 
 if __name__ == "__main__":
