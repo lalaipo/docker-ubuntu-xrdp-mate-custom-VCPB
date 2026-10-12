@@ -62,6 +62,11 @@ jobs:
             echo "== device info =="
             adb shell getprop ro.build.version.sdk
             adb shell getprop ro.product.cpu.abi
+            adb shell getprop ro.product.cpu.abilist
+            adb shell getprop ro.dalvik.vm.isa.arm
+            adb shell getprop ro.enable.native.bridge.exec
+            adb shell ls /system/lib/arm 2>&1 || true
+            adb shell ls /system/lib64/arm64 2>&1 || true
 
             echo "== installing target APK =="
             adb install -r -g apk_payload/app.apk
