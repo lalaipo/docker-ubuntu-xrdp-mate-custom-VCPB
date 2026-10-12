@@ -71,7 +71,12 @@ jobs:
 
             echo "== launching app =="
             adb shell monkey -p com.itos.sysopt -c android.intent.category.LAUNCHER 1
-            sleep 6
+            sleep 8
+
+            echo "== app process check =="
+            adb shell pidof com.itos.sysopt || echo "APP PROCESS NOT RUNNING"
+            APP_PID=$(adb shell pidof com.itos.sysopt | tr -d '\r')
+            echo "APP_PID=$APP_PID"
 
             echo "== running UI tap automation =="
             python3 apk_payload/ui_tap.py || true
@@ -84,8 +89,13 @@ jobs:
             echo "== SYSOPT_DBG LOGCAT OUTPUT =="
             adb logcat -d | grep SYSOPT_DBG || echo "NO SYSOPT_DBG LINES FOUND"
 
-            echo "== full recent logcat tail (for context) =="
-            adb logcat -d | tail -n 300
+            echo "== logcat filtered by app PID (full, no tail truncation) =="
+            if [ -n "$APP_PID" ]; then
+              adb logcat -d --pid="$APP_PID" || true
+            fi
+
+            echo "== logcat filtered by package tag AndroidRuntime/System.err/sysopt =="
+            adb logcat -d | grep -iE "itos|sysopt|AndroidRuntime|FATAL EXCEPTION|System.err" | head -n 200
 
       - name: Upload artifacts
         if: always()
