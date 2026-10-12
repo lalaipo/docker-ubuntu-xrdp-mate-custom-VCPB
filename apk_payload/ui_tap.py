@@ -4,11 +4,11 @@ import time
 import xml.etree.ElementTree as ET
 
 
-def dump_ui(path="/sdcard/window_dump.xml", local="./window_dump.xml"):
-    subprocess.run(["adb", "shell", "uiautomator", "dump", path], check=False)
-    subprocess.run(["adb", "pull", path, local], check=False)
+def dump_ui(remote_path="/sdcard/window_dump.xml", local_path="./window_dump.xml"):
+    subprocess.run(["adb", "shell", "uiautomator", "dump", remote_path], check=False)
+    subprocess.run(["adb", "pull", remote_path, local_path], check=False)
     try:
-        with open(local, "r", encoding="utf-8", errors="ignore") as f:
+        with open(local_path, "r", encoding="utf-8", errors="ignore") as f:
             return f.read()
     except Exception as e:
         print("dump_ui read error:", e)
@@ -22,17 +22,19 @@ def parse_nodes(xml_text):
     try:
         root = ET.fromstring(xml_text)
         for node in root.iter("node"):
-            text = node.attrib.get("text", "")
-            desc = node.attrib.get("content-desc", "")
+            text = node.attrib.get("text", "").strip()
+            desc = node.attrib.get("content-desc", "").strip()
             cls = node.attrib.get("class", "")
             bounds = node.attrib.get("bounds", "")
             clickable = node.attrib.get("clickable", "false") == "true"
+            checked = node.attrib.get("checked", "false") == "true"
             nodes.append({
                 "text": text,
                 "desc": desc,
                 "class": cls,
                 "bounds": bounds,
-                "clickable": clickable
+                "clickable": clickable,
+                "checked": checked
             })
     except Exception as e:
         print("parse error:", e)
@@ -47,9 +49,24 @@ def center_of(bounds):
     return 540, 960
 
 
+def switch_coords(bounds):
+    nums = list(map(int, re.findall(r"-?\d+", bounds)))
+    if len(nums) == 4:
+        x1, y1, x2, y2 = nums
+        # Switch thumb is on right side
+        return x2 - 90, (y1 + y2) // 2
+    return 950, 500
+
+
 def tap(x, y):
-    print(f"--> TAP at ({x}, {y})")
+    print(f"--> [TAP] at ({x}, {y})")
     subprocess.run(["adb", "shell", "input", "tap", str(x), str(y)], check=False)
+
+
+def swipe_up():
+    print("--> [SWIPE UP] (scroll down)")
+    subprocess.run(["adb", "shell", "input", "swipe", "540", "1500", "540", "500", "400"], check=False)
+    time.sleep(1.5)
 
 
 def take_screen(remote="/sdcard/screen.png", local="./screen.png"):
@@ -58,64 +75,79 @@ def take_screen(remote="/sdcard/screen.png", local="./screen.png"):
 
 
 def main():
-    print("=== STEP 1: INITIAL UI ===")
-    xml1 = dump_ui("/sdcard/ui_initial.xml", "./ui_initial.xml")
+    print("=== TEST START: WAITING 3S FOR LAUNCH ===")
+    time.sleep(3)
+
+    # 1. Capture BEFORE screen
+    print("\n=== STEP 1: CAPTURE INITIAL SCREEN (BEFORE TOGGLE) ===")
+    take_screen("/sdcard/screen_before_toggle.png", "./screen_before_toggle.png")
+    xml1 = dump_ui("/sdcard/ui_before.xml", "./ui_before.xml")
     nodes1 = parse_nodes(xml1)
     texts1 = [n["text"] for n in nodes1 if n["text"]]
-    descs1 = [n["desc"] for n in nodes1 if n["desc"]]
-    print("Initial texts:", texts1)
-    print("Initial descs:", descs1)
+    print("Initial visible texts:", texts1)
 
-    # 1. Test clicking "Game Enhance"
-    print("\n=== STEP 2: TAP 'Game Enhance' ===")
-    game_enhance = next((n for n in nodes1 if "game enhance" in n["text"].lower()), None)
-    if game_enhance:
-        x, y = center_of(game_enhance["bounds"])
-        print(f"Found 'Game Enhance' at {x}, {y}. Tapping...")
-        tap(x, y)
-    else:
-        print("Fallback tap at (288, 367)")
-        tap(288, 367)
+    target_kws = ["virtual", "gpu", "compilation", "wifi", "boost", "speed", "hardware", "battery"]
+    target_node = None
 
-    time.sleep(2)
-    take_screen("/sdcard/screen_after_ge.png", "./screen_after_ge.png")
+    # Search for target toggle
+    for attempt in range(4):
+        print(f"\n--- Checking viewport {attempt} ---")
+        for n in nodes1:
+            combined = (n["text"] + " " + n["desc"]).lower()
+            for kw in target_kws:
+                if kw in combined:
+                    print(f"Found match: text={repr(n['text'])}, desc={repr(n['desc'])}, bounds={n['bounds']}")
+                    target_node = n
+                    break
+            if target_node:
+                break
+        if target_node:
+            break
+        print("Target not found in current view, scrolling...")
+        swipe_up()
+        xml1 = dump_ui(f"/sdcard/ui_scroll_{attempt}.xml", f"./ui_scroll_{attempt}.xml")
+        nodes1 = parse_nodes(xml1)
+        print("New texts:", [n["text"] for n in nodes1 if n["text"]])
 
-    xml2 = dump_ui("/sdcard/ui_after_ge.xml", "./ui_after_ge.xml")
-    nodes2 = parse_nodes(xml2)
-    texts2 = [n["text"] for n in nodes2 if n["text"]]
-    descs2 = [n["desc"] for n in nodes2 if n["desc"]]
-    print("Texts after 'Game Enhance':", texts2)
-    print("Descs after 'Game Enhance':", descs2)
+    if not target_node:
+        print("No keyword match found, finding first clickable row...")
+        for n in nodes1:
+            if n["clickable"] and n["text"]:
+                target_node = n
+                break
 
-    # Check if a dialog or new screen appeared
-    for n in nodes2:
-        if n["text"] and n["text"] not in texts1:
-            print(f"NEW ELEMENT: {n}")
-        if any(kw in (n["text"] + " " + n["desc"]).lower() for kw in ["confirm", "apply", "ok", "enable", "start", "opt"]):
-            x, y = center_of(n["bounds"])
-            print(f"Action button found: {n}. Tapping...")
-            tap(x, y)
-            time.sleep(1)
+    if target_node:
+        print(f"\nTarget element selected: {target_node}")
+        sx, sy = switch_coords(target_node["bounds"])
+        cx, cy = center_of(target_node["bounds"])
+        print(f"Row center: ({cx}, {cy}), Switch target: ({sx}, {sy})")
 
-    # 2. Test clicking "One-Click Restore"
-    print("\n=== STEP 3: TAP 'One-Click Restore' ===")
-    restore = next((n for n in nodes1 if "restore" in n["text"].lower()), None)
-    if restore:
-        x, y = center_of(restore["bounds"])
-        print(f"Found 'Restore' at {x}, {y}. Tapping...")
-        tap(x, y)
+        # 2. Tap toggle to turn ON
+        print("\n=== STEP 2: TAP TOGGLE (TURNING ON) ===")
+        tap(sx, sy)
         time.sleep(2)
-        take_screen("/sdcard/screen_after_restore.png", "./screen_after_restore.png")
-        xml3 = dump_ui("/sdcard/ui_after_restore.xml", "./ui_after_restore.xml")
-        nodes3 = parse_nodes(xml3)
-        print("Texts after 'Restore':", [n["text"] for n in nodes3 if n["text"]])
 
-    # 3. Dump logcat SYSOPT_DBG
-    print("\n=== STEP 4: LOGCAT INSPECTION ===")
+        # 3. Capture AFTER screen
+        print("\n=== STEP 3: CAPTURE SCREEN AFTER TOGGLE ===")
+        take_screen("/sdcard/screen_after_toggle.png", "./screen_after_toggle.png")
+        xml2 = dump_ui("/sdcard/ui_after.xml", "./ui_after.xml")
+        nodes2 = parse_nodes(xml2)
+        print("Post-toggle texts:", [n["text"] for n in nodes2 if n["text"]])
+
+        # 4. Tap toggle again to turn OFF
+        print("\n=== STEP 4: TAP TOGGLE AGAIN (TURNING OFF) ===")
+        tap(sx, sy)
+        time.sleep(2)
+        take_screen("/sdcard/screen_toggle_off.png", "./screen_toggle_off.png")
+    else:
+        print("ERROR: No interactive element found!")
+
+    # 5. Logcat summary
+    print("\n=== STEP 5: LOGCAT SYSOPT_DBG SUMMARY ===")
     out = subprocess.run(["adb", "logcat", "-d"], capture_output=True, text=True, errors="ignore").stdout
-    dbg_lines = [l for l in out.splitlines() if "SYSOPT_DBG" in l]
-    print(f"Found {len(dbg_lines)} SYSOPT_DBG lines:")
-    for l in dbg_lines[-30:]:
+    dbg = [l for l in out.splitlines() if "SYSOPT_DBG" in l]
+    print(f"Total SYSOPT_DBG lines: {len(dbg)}")
+    for l in dbg[-25:]:
         print(l)
 
 
