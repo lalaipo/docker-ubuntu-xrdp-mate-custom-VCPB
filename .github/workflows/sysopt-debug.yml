@@ -108,6 +108,6 @@ jobs:
         with:
           name: sysopt-debug-artifacts
           path: |
-            window_dump*.xml
-            screen1.png
+            *.xml
+            *.png
           if-no-files-found: warn

@@ -52,78 +52,71 @@ def tap(x, y):
     subprocess.run(["adb", "shell", "input", "tap", str(x), str(y)], check=False)
 
 
-def swipe_up():
-    print("--> SWIPE UP (scroll down)")
-    subprocess.run(["adb", "shell", "input", "swipe", "540", "1400", "540", "400", "400"], check=False)
-    time.sleep(1.5)
-
-
-def print_visible_texts(nodes):
-    texts = [n["text"] for n in nodes if n["text"]]
-    descs = [n["desc"] for n in nodes if n["desc"]]
-    print("Visible texts:", texts)
-    if descs:
-        print("Visible descs:", descs)
+def take_screen(remote="/sdcard/screen.png", local="./screen.png"):
+    subprocess.run(["adb", "shell", "screencap", "-p", remote], check=False)
+    subprocess.run(["adb", "pull", remote, local], check=False)
 
 
 def main():
     print("=== STEP 1: INITIAL UI ===")
-    xml = dump_ui("/sdcard/ui_initial.xml", "./ui_initial.xml")
-    nodes = parse_nodes(xml)
-    print_visible_texts(nodes)
+    xml1 = dump_ui("/sdcard/ui_initial.xml", "./ui_initial.xml")
+    nodes1 = parse_nodes(xml1)
+    texts1 = [n["text"] for n in nodes1 if n["text"]]
+    descs1 = [n["desc"] for n in nodes1 if n["desc"]]
+    print("Initial texts:", texts1)
+    print("Initial descs:", descs1)
 
-    # Let's scroll down up to 3 times looking for "Advanced Tools" or toggle keywords
-    target_kws = ["virtual", "gpu", "wifi", "boost", "advanced", "protect", "speed", "turbo", "battery", "performance"]
-
-    found_target = None
-    for attempt in range(4):
-        print(f"\n--- Search round {attempt} ---")
-        for n in nodes:
-            combined = (n["text"] + " " + n["desc"]).lower()
-            for kw in target_kws:
-                if kw in combined:
-                    print(f"MATCH FOUND: text={repr(n['text'])} desc={repr(n['desc'])} bounds={n['bounds']} class={n['class']}")
-                    if any(k in combined for k in ["virtual", "gpu", "engine", "wifi", "battery"]):
-                        found_target = n
-                        break
-            if found_target:
-                break
-
-        if found_target:
-            break
-
-        print("Target not in current viewport, scrolling down...")
-        swipe_up()
-        xml = dump_ui(f"/sdcard/ui_scroll_{attempt}.xml", f"./ui_scroll_{attempt}.xml")
-        nodes = parse_nodes(xml)
-        print_visible_texts(nodes)
-
-    if found_target:
-        print(f"\nTarget to tap: {found_target}")
-        x, y = center_of(found_target["bounds"])
-        # If it's a row, the switch might be on the right side of the row!
-        # So we tap center first, then right edge
-        nums = list(map(int, re.findall(r"-?\d+", found_target["bounds"])))
-        x1, y1, x2, y2 = nums
-        right_x = x2 - 80
-        center_y = (y1 + y2) // 2
-
-        print(f"Tapping target row center ({x}, {y})")
+    # 1. Test clicking "Game Enhance"
+    print("\n=== STEP 2: TAP 'Game Enhance' ===")
+    game_enhance = next((n for n in nodes1 if "game enhance" in n["text"].lower()), None)
+    if game_enhance:
+        x, y = center_of(game_enhance["bounds"])
+        print(f"Found 'Game Enhance' at {x}, {y}. Tapping...")
         tap(x, y)
-        time.sleep(1)
-        print(f"Tapping target switch area on right ({right_x}, {center_y})")
-        tap(right_x, center_y)
-        time.sleep(1)
-        tap(right_x, center_y)
-        time.sleep(1)
     else:
-        print("\nNo specific toggle found by keyword, dumping all clickable elements on current screen:")
-        for n in nodes:
-            if n["clickable"] or "button" in n["class"].lower() or "switch" in n["class"].lower():
-                print(f"Clickable: {n}")
-                x, y = center_of(n["bounds"])
-                tap(x, y)
-                time.sleep(1)
+        print("Fallback tap at (288, 367)")
+        tap(288, 367)
+
+    time.sleep(2)
+    take_screen("/sdcard/screen_after_ge.png", "./screen_after_ge.png")
+
+    xml2 = dump_ui("/sdcard/ui_after_ge.xml", "./ui_after_ge.xml")
+    nodes2 = parse_nodes(xml2)
+    texts2 = [n["text"] for n in nodes2 if n["text"]]
+    descs2 = [n["desc"] for n in nodes2 if n["desc"]]
+    print("Texts after 'Game Enhance':", texts2)
+    print("Descs after 'Game Enhance':", descs2)
+
+    # Check if a dialog or new screen appeared
+    for n in nodes2:
+        if n["text"] and n["text"] not in texts1:
+            print(f"NEW ELEMENT: {n}")
+        if any(kw in (n["text"] + " " + n["desc"]).lower() for kw in ["confirm", "apply", "ok", "enable", "start", "opt"]):
+            x, y = center_of(n["bounds"])
+            print(f"Action button found: {n}. Tapping...")
+            tap(x, y)
+            time.sleep(1)
+
+    # 2. Test clicking "One-Click Restore"
+    print("\n=== STEP 3: TAP 'One-Click Restore' ===")
+    restore = next((n for n in nodes1 if "restore" in n["text"].lower()), None)
+    if restore:
+        x, y = center_of(restore["bounds"])
+        print(f"Found 'Restore' at {x}, {y}. Tapping...")
+        tap(x, y)
+        time.sleep(2)
+        take_screen("/sdcard/screen_after_restore.png", "./screen_after_restore.png")
+        xml3 = dump_ui("/sdcard/ui_after_restore.xml", "./ui_after_restore.xml")
+        nodes3 = parse_nodes(xml3)
+        print("Texts after 'Restore':", [n["text"] for n in nodes3 if n["text"]])
+
+    # 3. Dump logcat SYSOPT_DBG
+    print("\n=== STEP 4: LOGCAT INSPECTION ===")
+    out = subprocess.run(["adb", "logcat", "-d"], capture_output=True, text=True, errors="ignore").stdout
+    dbg_lines = [l for l in out.splitlines() if "SYSOPT_DBG" in l]
+    print(f"Found {len(dbg_lines)} SYSOPT_DBG lines:")
+    for l in dbg_lines[-30:]:
+        print(l)
 
 
 if __name__ == "__main__":
