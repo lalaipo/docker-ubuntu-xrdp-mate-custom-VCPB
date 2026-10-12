@@ -29,14 +29,14 @@ jobs:
           path: |
             ~/.android/avd/*
             ~/.android/adb*
-          key: avd-26-x86_64-v1
+          key: avd-28-playstore-x86_64-v1
 
       - name: Create AVD and generate snapshot for caching
         if: steps.avd-cache.outputs.cache-hit != 'true'
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 26
-          target: google_apis
+          api-level: 28
+          target: google_apis_playstore
           arch: x86_64
           profile: pixel
           force-avd-creation: false
@@ -47,8 +47,8 @@ jobs:
       - name: Run instrumentation capture
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 26
-          target: google_apis
+          api-level: 28
+          target: google_apis_playstore
           arch: x86_64
           profile: pixel
           force-avd-creation: false
