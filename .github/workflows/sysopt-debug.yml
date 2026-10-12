@@ -76,8 +76,17 @@ jobs:
             echo "== app process check =="
             adb shell "pidof com.itos.sysopt || echo APP_PROCESS_NOT_RUNNING"
 
+            echo "== current foreground activity/window =="
+            adb shell "dumpsys activity activities | grep -A2 mResumedActivity" || true
+            adb shell "dumpsys window windows | grep -i mCurrentFocus" || true
+            adb shell "dumpsys activity top | head -n 30" || true
+
             echo "== running UI tap automation =="
             python3 apk_payload/ui_tap.py || true
+
+            echo "== take screenshot for visual inspection =="
+            adb shell screencap -p /sdcard/screen1.png || true
+            adb pull /sdcard/screen1.png ./screen1.png || true
 
             sleep 3
             echo "== final UI dump after taps =="
@@ -100,4 +109,5 @@ jobs:
           name: sysopt-debug-artifacts
           path: |
             window_dump*.xml
+            screen1.png
           if-no-files-found: warn
